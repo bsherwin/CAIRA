@@ -12,6 +12,7 @@ This script:
 
 import os
 import time
+import base64
 from typing import Optional
 from azure.identity import DefaultAzureCredential
 import requests
@@ -47,8 +48,8 @@ class FabricFoundryIntegration:
             "Content-Type": "application/json",
         }
 
-        with open(notebook_path, "r") as f:
-            notebook_content = f.read()
+        with open(notebook_path, "rb") as f:
+            notebook_content = base64.b64encode(f.read()).decode("utf-8")
 
         # Create notebook in Fabric workspace
         create_url = f"https://api.fabric.microsoft.com/v1/workspaces/{self.fabric_workspace_id}/notebooks"
@@ -278,7 +279,7 @@ def main():
         return
 
     # Step 4: Create Fabric connection in AI Foundry Project
-    connection_name = integration.create_fabric_connection(data_agent_artifact_id, AI_FOUNDRY_ACCOUNT_NAME)
+    connection_name = integration.create_fabric_connection(data_agent_artifact_id)
 
     # Step 5: Create AI Foundry Agent
     agent_id = integration.create_ai_foundry_agent(connection_name)

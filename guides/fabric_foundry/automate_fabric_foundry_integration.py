@@ -17,6 +17,7 @@ from typing import Optional
 from azure.identity import DefaultAzureCredential
 import requests
 
+FABRIC_DATA_AGENT_NAME = "data_agent_automation_sample"
 
 class FabricFoundryIntegration:
     def __init__(
@@ -112,7 +113,7 @@ class FabricFoundryIntegration:
         print("✗ Timeout waiting for notebook completion")
         return False
 
-    def get_data_agent_artifact_id(self, data_agent_name: str = "data_agent_automation_sample") -> Optional[str]:
+    def get_data_agent_artifact_id(self, data_agent_name: str) -> Optional[str]:
         """Retrieve the artifact ID of the created Fabric Data Agent."""
         headers = {"Authorization": f"Bearer {self.fabric_token}"}
 
@@ -273,7 +274,7 @@ def main():
         return
 
     # Step 3: Retrieve data agent artifact ID
-    data_agent_artifact_id = integration.get_data_agent_artifact_id()
+    data_agent_artifact_id = integration.get_data_agent_artifact_id(FABRIC_DATA_AGENT_NAME)
     if not data_agent_artifact_id:
         print("✗ Could not retrieve data agent artifact ID, aborting")
         return

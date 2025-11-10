@@ -115,23 +115,32 @@ class FabricFoundryIntegration:
         """Retrieve the artifact ID of the created Fabric Data Agent."""
         headers = {"Authorization": f"Bearer {self.fabric_token}"}
 
-        # List all DataAgent artifacts in the workspace
-        list_url = f"https://api.fabric.microsoft.com/v1/workspaces/{self.fabric_workspace_id}/dataAgents"
+        # List all items in the workspace
+        list_url = f"https://api.fabric.microsoft.com/v1/workspaces/{self.fabric_workspace_id}/items"
 
         response = requests.get(list_url, headers=headers)
         response.raise_for_status()
-        data_agents = response.json().get("value", [])
+        items = response.json().get("value", [])
 
-        for agent in data_agents:
-            if agent.get("displayName") == data_agent_name:
-                artifact_id = agent["id"]
+        # Find the DataAgent item by name and type
+        for item in items:
+            if item.get("displayName") == data_agent_name: # and item.get("type") == "DataAgent"
+                item_id = item["id"]
+
+                # Get the specific item to retrieve full details
+                get_item_url = f"https://api.fabric.microsoft.com/v1/workspaces/{self.fabric_workspace_id}/items/{item_id}"
+                item_response = requests.get(get_item_url, headers=headers)
+                item_response.raise_for_status()
+                item_details = item_response.json()
+
+                artifact_id = item_details["id"]
                 print(f"✓ Found data agent '{data_agent_name}' with artifact ID: {artifact_id}")
                 return artifact_id
 
         print(f"✗ Data agent '{data_agent_name}' not found")
         return None
 
-    def create_fabric_connection(self, data_agent_artifact_id: str, ai_foundry_account_name: str) -> str:
+    def create_fabric_connection(self, data_agent_artifact_id: str) -> str:
         """Create a Connected Resource connection in AI Foundry Project to Fabric."""
         connection_name = "fabric-data-agent-connection"
 
@@ -157,12 +166,14 @@ class FabricFoundryIntegration:
             "properties": {
                 "category": "FabricDataAgent",
                 "target": f"https://api.fabric.microsoft.com/v1/workspaces/{self.fabric_workspace_id}/dataAgents/{data_agent_artifact_id}",
-                "authType": "AAD",
-                "metadata": {
-                    "workspaceId": self.fabric_workspace_id,
-                    "artifactId": data_agent_artifact_id,
-                    "apiType": "FabricDataAgent",
-                },
+                "authType": "CustomKeys",
+                "credentials": {
+                    "keys": {
+                        "workspace-id": self.fabric_workspace_id,
+                        "artifact-id": data_agent_artifact_id,
+                        "type": "fabric_dataagent"
+                    }
+                }
             }
         }
 

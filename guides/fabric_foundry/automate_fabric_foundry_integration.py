@@ -57,10 +57,7 @@ class FabricFoundryIntegration:
         )
         self.ai_client = AIProjectClient(
             endpoint=project_scope,
-            credential=self.credential,
-            subscription_id=ai_foundry_subscription_id,
-            resource_group_name=ai_foundry_resource_group,
-            project_name=ai_foundry_project_name
+            credential=self.credential
         )
 
     # ============================================================================
@@ -309,6 +306,11 @@ class FabricFoundryIntegration:
     def create_ai_foundry_agent(self, connection_id: str, model_deployment_name: str) -> str:
         """Create an AI Foundry Agent using the Fabric connection as knowledge source."""
         from azure.ai.agents.models import FabricTool
+
+        print("Available model deployments in the project:")
+        deployments = self.ai_client.deployments.list()  # .deployments is the property for model deployments
+        for d in deployments:
+            print(f"Name: {d.name}, Model: {d.modelName}, Version: {d.modelVersion}, Type: {d.type}")
 
         # Initialize an Agent Fabric tool and add the connection id
         fabric = FabricTool(connection_id=connection_id)

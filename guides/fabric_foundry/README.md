@@ -68,14 +68,6 @@ The script will:
 - Create an AI Foundry Agent with FabricTool using Azure AI Projects SDK
 - Output the created resource IDs
 
-## Debugging
-
-To debug the script in VS Code:
-
-1. The `.vscode/launch.json` is configured to use the uv virtual environment
-1. Set breakpoints in the script
-1. Press F5 or use "Run and Debug" to start debugging
-
 ## Implementation Notes
 
 ### Connection Creation

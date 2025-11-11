@@ -14,8 +14,13 @@ import os
 import time
 import base64
 from typing import Optional
+from pathlib import Path
 from azure.identity import DefaultAzureCredential
 import requests
+
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
 
 FABRIC_DATA_AGENT_NAME = "data_agent_automation_sample"
 
@@ -49,13 +54,27 @@ class FabricFoundryIntegration:
             "Content-Type": "application/json",
         }
 
+        # Check if notebook already exists
+        list_url = f"https://api.fabric.microsoft.com/v1/workspaces/{self.fabric_workspace_id}/items"
+        list_response = requests.get(list_url, headers=headers)
+        list_response.raise_for_status()
+        items = list_response.json().get("value", [])
+
+        for item in items:
+            if item.get("displayName") == notebook_name and item.get("type") == "Notebook":
+                notebook_id = item["id"]
+                print(f"✓ Found existing notebook '{notebook_name}' with ID: {notebook_id}")
+                return notebook_id
+
+        # Notebook doesn't exist, create it
         with open(notebook_path, "rb") as f:
             notebook_content = base64.b64encode(f.read()).decode("utf-8")
 
-        # Create notebook in Fabric workspace
-        create_url = f"https://api.fabric.microsoft.com/v1/workspaces/{self.fabric_workspace_id}/notebooks"
+        # Create notebook item in Fabric workspace
+        create_url = f"https://api.fabric.microsoft.com/v1/workspaces/{self.fabric_workspace_id}/items"
         payload = {
             "displayName": notebook_name,
+            "type": "Notebook",
             "definition": {
                 "format": "ipynb",
                 "parts": [
@@ -69,8 +88,17 @@ class FabricFoundryIntegration:
         }
 
         response = requests.post(create_url, headers=headers, json=payload)
+        if not response.ok:
+            print(f"✗ Error creating notebook: {response.status_code}")
+            print(f"  Response: {response.text}")
         response.raise_for_status()
-        notebook_id = response.json()["id"]
+
+        response_data = response.json()
+        if not response_data or "id" not in response_data:
+            print(f"✗ Unexpected response format: {response.text}")
+            raise ValueError("Response missing 'id' field")
+
+        notebook_id = response_data["id"]
         print(f"✓ Uploaded notebook '{notebook_name}' with ID: {notebook_id}")
         return notebook_id
 
@@ -84,8 +112,37 @@ class FabricFoundryIntegration:
         run_url = f"https://api.fabric.microsoft.com/v1/workspaces/{self.fabric_workspace_id}/notebooks/{notebook_id}/jobs/instances?jobType=RunNotebook"
 
         response = requests.post(run_url, headers=headers)
+        if not response.ok:
+            print(f"✗ Error triggering notebook: {response.status_code}")
+            print(f"  Response: {response.text}")
         response.raise_for_status()
-        job_id = response.json()["id"]
+
+        # For 202 Accepted, the job ID might be in Location header
+        if response.status_code == 202:
+            location = response.headers.get("Location", "")
+            if location:
+                # Extract job ID from Location header
+                job_id = location.split("/")[-1]
+                print(f"✓ Triggered notebook run with job ID: {job_id}")
+                return job_id
+            else:
+                print(f"✓ Notebook run triggered (202 Accepted), checking for running jobs...")
+                # Get the most recent job
+                time.sleep(2)  # Give it a moment to register
+                jobs_url = f"https://api.fabric.microsoft.com/v1/workspaces/{self.fabric_workspace_id}/notebooks/{notebook_id}/jobs/instances"
+                jobs_response = requests.get(jobs_url, headers=headers)
+                jobs_response.raise_for_status()
+                jobs = jobs_response.json().get("value", [])
+                if jobs:
+                    job_id = jobs[0]["id"]
+                    print(f"✓ Found running job with ID: {job_id}")
+                    return job_id
+                else:
+                    raise ValueError("Notebook run triggered but no job ID found")
+
+        # Normal response with body
+        response_data = response.json()
+        job_id = response_data["id"]
         print(f"✓ Triggered notebook run with job ID: {job_id}")
         return job_id
 
@@ -126,7 +183,7 @@ class FabricFoundryIntegration:
 
         # Find the DataAgent item by name and type
         for item in items:
-            if item.get("displayName") == data_agent_name: # and item.get("type") == "DataAgent"
+            if item.get("displayName") == data_agent_name: # and item.get("type") == "aiskills"
                 item_id = item["id"]
 
                 # Get the specific item to retrieve full details

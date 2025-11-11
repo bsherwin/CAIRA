@@ -16,6 +16,8 @@ import time
 import base64
 from typing import Optional, Dict, Any
 from azure.identity import DefaultAzureCredential
+from azure.ai.projects import AIProjectClient
+from azure.ai.projects.models import ConnectionType
 import requests
 from dotenv import load_dotenv
 
@@ -48,6 +50,18 @@ class FabricFoundryIntegration:
         self.credential = DefaultAzureCredential()
         self._fabric_token = None
         self._arm_token = None
+
+        # Initialize AI Project Client
+        project_scope = (
+            f"https://{ai_foundry_account_name}.cognitiveservices.azure.com/"
+        )
+        self.ai_client = AIProjectClient(
+            endpoint=project_scope,
+            credential=self.credential,
+            subscription_id=ai_foundry_subscription_id,
+            resource_group_name=ai_foundry_resource_group,
+            project_name=ai_foundry_project_name
+        )
 
     # ============================================================================
     # Authentication Helpers
@@ -254,16 +268,8 @@ class FabricFoundryIntegration:
             f"?api-version={AI_FOUNDRY_API_VERSION}"
         )
 
-    def _build_agent_url(self, agent_name: str) -> str:
-        """Build the ARM URL for AI Foundry Project agent."""
-        return (
-            f"https://management.azure.com/subscriptions/{self.ai_foundry_subscription_id}"
-            f"/resourceGroups/{self.ai_foundry_resource_group}"
-            f"/providers/Microsoft.CognitiveServices/accounts/{self.ai_foundry_account_name}"
-            f"/projects/{self.ai_foundry_project_name}"
-            f"/agents/{agent_name}"
-            f"?api-version={AI_FOUNDRY_API_VERSION}"
-        )
+    # ============================================================================
+    # Fabric Data Agent Operations
 
     def create_foundry_to_fabric_connection(self, data_agent_artifact_id: str) -> str:
         """Create a Connected Resource connection in AI Foundry Project to Fabric."""
@@ -289,38 +295,34 @@ class FabricFoundryIntegration:
             raise Exception(f"Failed to create connection: {response.status_code} - {response.text}")
 
         print(f"✓ Created Fabric connection: {connection_name}")
-        return connection_name
 
-    def create_ai_foundry_agent(self, connection_name: str) -> str:
+        # Return full connection resource ID for agent creation
+        connection_id = (
+            f"/subscriptions/{self.ai_foundry_subscription_id}"
+            f"/resourceGroups/{self.ai_foundry_resource_group}"
+            f"/providers/Microsoft.CognitiveServices/accounts/{self.ai_foundry_account_name}"
+            f"/projects/{self.ai_foundry_project_name}"
+            f"/connections/{connection_name}"
+        )
+        return connection_id
+
+    def create_ai_foundry_agent(self, connection_id: str, model_deployment_name: str) -> str:
         """Create an AI Foundry Agent using the Fabric connection as knowledge source."""
-        agent_name = "fabric-data-agent"
-        agent_url = self._build_agent_url(agent_name)
+        from azure.ai.agents.models import FabricTool
 
-        agent_payload = {
-            "properties": {
-                "model": "gpt-4o",
-                "instructions": "You are a helpful assistant with access to NYC taxi data through Fabric Data Agent. Help users answer questions about taxi ridership.",
-                "tools": [{"type": "code_interpreter"}],
-                "toolResources": {
-                    "codeInterpreter": {
-                        "dataSources": [
-                            {
-                                "type": "fabric_data_agent",
-                                "connectionId": connection_name,
-                            }
-                        ]
-                    }
-                },
-            }
-        }
+        # Initialize an Agent Fabric tool and add the connection id
+        fabric = FabricTool(connection_id=connection_id)
 
-        response = requests.put(agent_url, headers=self._get_arm_headers(), json=agent_payload)
-        if not response.ok:
-            raise Exception(f"Failed to create agent: {response.status_code} - {response.text}")
+        # Create an Agent with the Fabric tool
+        agent = self.ai_client.agents.create_agent(
+            model=model_deployment_name,
+            name="fabric-data-agent",
+            instructions="You are a helpful assistant with access to NYC taxi data through Fabric Data Agent. Help users answer questions about taxi ridership.",
+            tools=fabric.definitions
+        )
 
-        agent_id = response.json().get("id", agent_name)
-        print(f"✓ Created AI Foundry Agent with ID: {agent_id}")
-        return agent_id
+        print(f"✓ Created AI Foundry Agent with ID: {agent.id}")
+        return agent.id
 
 
 # ============================================================================
@@ -335,6 +337,7 @@ def validate_environment() -> Dict[str, str]:
         "AI_FOUNDRY_RESOURCE_GROUP": os.getenv("AI_FOUNDRY_RESOURCE_GROUP", ""),
         "AI_FOUNDRY_ACCOUNT_NAME": os.getenv("AI_FOUNDRY_ACCOUNT_NAME", ""),
         "AI_FOUNDRY_PROJECT_NAME": os.getenv("AI_FOUNDRY_PROJECT_NAME", ""),
+        "AI_FOUNDRY_MODEL_DEPLOYMENT_NAME": os.getenv("AI_FOUNDRY_MODEL_DEPLOYMENT_NAME", "gpt-4o"),
     }
 
     missing_vars = [key for key, value in required_vars.items() if not value]
@@ -370,39 +373,43 @@ def main():
 
     try:
         # Step 1: Upload notebook
-        print("\n[Step 1/5] Uploading notebook...")
+        print("\n[Step 1/6] Uploading notebook...")
         notebook_path = "create_fabric_data_agent.ipynb"
         notebook_id = integration.upload_notebook(notebook_path, "create_fabric_data_agent")
 
         # Step 2: Trigger notebook run
-        print("\n[Step 2/5] Triggering notebook execution...")
+        print("\n[Step 2/6] Triggering notebook execution...")
         job_id = integration.trigger_notebook_run(notebook_id)
 
         # Step 3: Wait for completion
-        print("\n[Step 3/5] Waiting for notebook completion...")
+        print("\n[Step 3/6] Waiting for notebook completion...")
         if not integration.wait_for_notebook_completion(notebook_id, job_id):
             print("✗ Notebook execution failed, aborting")
             sys.exit(1)
 
         # Step 4: Retrieve data agent artifact ID
-        print("\n[Step 4/5] Retrieving data agent artifact ID...")
+        print("\n[Step 4/6] Retrieving data agent artifact ID...")
         data_agent_artifact_id = integration.get_data_agent_artifact_id(FABRIC_DATA_AGENT_NAME)
         if not data_agent_artifact_id:
             print("✗ Could not retrieve data agent artifact ID, aborting")
             sys.exit(1)
 
         # Step 5: Create Fabric connection in AI Foundry Project
-        print("\n[Step 5/5] Creating AI Foundry connection and agent...")
-        connection_name = integration.create_foundry_to_fabric_connection(data_agent_artifact_id)
+        print("\n[Step 5/6] Creating AI Foundry connection")
+        connection_id = integration.create_foundry_to_fabric_connection(data_agent_artifact_id)
 
         # Step 6: Create AI Foundry Agent
-        agent_id = integration.create_ai_foundry_agent(connection_name)
+        print("\n[Step 6/6] Creating AI Foundry agent")
+        agent_id = integration.create_ai_foundry_agent(
+            connection_id,
+            env_vars["AI_FOUNDRY_MODEL_DEPLOYMENT_NAME"]
+        )
 
         # Success summary
         print("\n" + "=" * 60)
         print("✓ Integration complete!")
         print(f"  - Data Agent Artifact ID: {data_agent_artifact_id}")
-        print(f"  - Connection Name: {connection_name}")
+        print(f"  - Connection ID: {connection_id}")
         print(f"  - Agent ID: {agent_id}")
         print("=" * 60)
 

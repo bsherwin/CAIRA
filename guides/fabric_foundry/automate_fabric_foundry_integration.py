@@ -265,21 +265,20 @@ class FabricFoundryIntegration:
             f"?api-version={AI_FOUNDRY_API_VERSION}"
         )
 
-    def create_fabric_connection(self, data_agent_artifact_id: str) -> str:
+    def create_foundry_to_fabric_connection(self, data_agent_artifact_id: str) -> str:
         """Create a Connected Resource connection in AI Foundry Project to Fabric."""
         connection_name = "fabric-data-agent-connection"
         connection_url = self._build_connection_url(connection_name)
 
         connection_payload = {
             "properties": {
-                "category": "FabricDataAgent",
-                "target": f"https://api.fabric.microsoft.com/v1/workspaces/{self.fabric_workspace_id}/dataAgents/{data_agent_artifact_id}",
+                "category": "CustomKeys",
                 "authType": "CustomKeys",
                 "credentials": {
                     "keys": {
                         "workspace-id": self.fabric_workspace_id,
                         "artifact-id": data_agent_artifact_id,
-                        "type": "fabric_dataagent",
+                        "type": "fabric_dataagent"
                     }
                 },
             }
@@ -394,7 +393,7 @@ def main():
 
         # Step 5: Create Fabric connection in AI Foundry Project
         print("\n[Step 5/5] Creating AI Foundry connection and agent...")
-        connection_name = integration.create_fabric_connection(data_agent_artifact_id)
+        connection_name = integration.create_foundry_to_fabric_connection(data_agent_artifact_id)
 
         # Step 6: Create AI Foundry Agent
         agent_id = integration.create_ai_foundry_agent(connection_name)
